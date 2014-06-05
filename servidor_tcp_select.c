@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 
 #define P_SIZE sizeof(struct psuma)
 
@@ -43,6 +44,8 @@ int main()
 	struct sockaddr_in servidor;
 	struct sockaddr_in cliente;
 	struct psuma *suma;
+	fd_set copia;
+	fd_set conjunto;
 
 	servidor.sin_family = AF_INET;
 	servidor.sin_port = htons(4444);
@@ -57,25 +60,39 @@ int main()
 
 	listen ( sd , 5 );
 
+	FD_ZERO (&conjunto);
+	FD_SET ( sd , &conjunto);
+
 	while (1) {
 
-		lon = sizeof(cliente);
-		sdc = accept ( sd, (struct sockaddr *) &cliente, &lon );
+		copia = conjunto;
+		select ( FD_SETSIZE , &copia , NULL , NULL , NULL );
 
-		while ( ( n = leer_mensaje ( sdc , buffer , P_SIZE ) ) > 0 ) {
-
-			suma = (struct psuma *) buffer;
-
-			printf("Recibí desde: %s puerto: %d los valores: v1 %d v2 %d res %d \n", inet_ntoa(cliente.sin_addr), ntohs( cliente.sin_port), ntohs(suma->v1), ntohs(suma->v2), ntohl(suma->res));
-
-			suma->res = htonl(ntohs(suma->v1) + ntohs(suma->v2));
-
-			printf("Enviando: v1 %d v2 %d res %d \n", ntohs(suma->v1), ntohs(suma->v2), ntohl(suma->res));
-
-			send ( sdc , buffer, P_SIZE, 0 );
+		if ( FD_ISSET (sd , &copia) ) {
+			lon = sizeof(cliente);
+			sdc = accept ( sd, (struct sockaddr *) &cliente, &lon );
+			FD_SET ( sdc , &conjunto);
 		}
+		
+		for ( sdc = 1; sdc < FD_SETSIZE; sdc++) {
 
-		close (sdc);
+			if ( FD_ISSET (sdc, &copia) && (sdc != sd) ) {
+
+				if ( ( n = leer_mensaje ( sdc , buffer , P_SIZE ) ) > 0 ) {
+					suma = (struct psuma *) buffer;
+					printf("Recibí desde: %s puerto: %d los valores: v1 %d v2 %d res %d\n", inet_ntoa(cliente.sin_addr), ntohs( cliente.sin_port), ntohs(suma->v1), ntohs(suma->v2), ntohl(suma->res));
+					suma->res = htonl(ntohs(suma->v1) + ntohs(suma->v2));
+					printf("Enviando: v1 %d v2 %d res %d \n", ntohs(suma->v1), ntohs(suma->v2), ntohl(suma->res));
+					send ( sdc , buffer, P_SIZE, 0 );
+				
+				} else {
+
+					close (sdc);
+					FD_CLR (sdc, &conjunto);
+
+				}
+			}
+		}
 
 	}
 
